@@ -49,7 +49,7 @@
         '  <input id="{{id}}_value" name="{{inputName}}" tabindex="{{fieldTabindex}}" ng-class="{\'angucomplete-input-not-empty\': notEmpty}" ng-model="searchStr" ng-disabled="disableInput" type="{{inputType}}" placeholder="{{placeholder}}" maxlength="{{maxlength}}" ng-focus="onFocusHandler()" class="{{inputClass}}" ng-focus="resetHideResults()" ng-blur="hideResults($event)" autocapitalize="off" autocorrect="off" autocomplete="off" ng-change="inputChangeHandler(searchStr)"/>' +
         '  <div id="{{id}}_dropdown" class="angucomplete-dropdown" ng-show="showDropdown">' +
         '    <div class="angucomplete-searching" ng-show="searching" ng-bind="textSearching"></div>' +
-        '    <div class="angucomplete-searching" ng-show="!searching && (!results || results.length == 0)" ng-bind="textNoResults"></div>' +
+        '    <div class="angucomplete-searching" ng-show="!searching" ng-bind="textNoResults" ng-click="selectOtherOption()"></div>' +
         '    <div class="angucomplete-row" ng-repeat="result in results" ng-click="selectResult(result)" ng-mouseenter="hoverRow($index)" ng-class="{\'angucomplete-selected-row\': $index == currentIndex}">' +
         '      <div ng-if="imageField" class="angucomplete-image-holder">' +
         '        <img ng-if="result.image && result.image != \'\'" ng-src="{{result.image}}" class="angucomplete-image"/>' +
@@ -73,7 +73,6 @@
       var responseFormatter;
       var validState = null;
       var httpCanceller = null;
-      var httpCallInProgress = false;
       var dd = elem[0].querySelector('.angucomplete-dropdown');
       var isScrollOn = false;
       var mousedownOn = null;
@@ -164,7 +163,7 @@
 
       function callOrAssign(value) {
         if (typeof scope.selectedObject === 'function') {
-          scope.selectedObject(value, scope.selectedObjectData);
+          scope.selectedObject(value);
         }
         else {
           scope.selectedObject = value;
@@ -441,15 +440,13 @@
       }
 
       function httpErrorCallback(errorRes, status, headers, config) {
-        scope.searching = httpCallInProgress;
+        // cancelled/aborted
+        if (status === 0 || status === -1) { return; }
 
         // normalize return obejct from promise
         if (!status && !headers && !config) {
           status = errorRes.status;
         }
-
-        // cancelled/aborted
-        if (status === 0 || status === -1) { return; }
         if (scope.remoteUrlErrorCallback) {
           scope.remoteUrlErrorCallback(errorRes, status, headers, config);
         }
@@ -479,11 +476,9 @@
         cancelHttpRequest();
         httpCanceller = $q.defer();
         params.timeout = httpCanceller.promise;
-        httpCallInProgress = true;
         $http.get(url, params)
-          .then(httpSuccessCallbackGen(str))
-          .catch(httpErrorCallback)
-          .finally(function(){httpCallInProgress=false;});
+          .success(httpSuccessCallbackGen(str))
+          .error(httpErrorCallback);
       }
 
       function getRemoteResultsWithCustomHandler(str) {
@@ -558,7 +553,7 @@
           scope.$apply(function() {
             var matches;
             if (typeof scope.localSearch() !== 'undefined') {
-              matches = scope.localSearch()(str, scope.localData);
+              matches = scope.localSearch()(str);
             } else {
               matches = getLocalResults(str);
             }
@@ -624,15 +619,12 @@
 
       function showAll() {
         if (scope.localData) {
-          scope.searching = false;
           processResults(scope.localData, '');
         }
         else if (scope.remoteApiHandler) {
-          scope.searching = true;
           getRemoteResultsWithCustomHandler('');
         }
         else {
-          scope.searching = true;
           getRemoteResults('');
         }
       }
@@ -687,6 +679,11 @@
         scope.currentIndex = index;
       };
 
+      scope.selectOtherOption = function() {
+        callOrAssign({title: scope.searchStr, description: scope.searchStr});
+        clearResults();
+      };
+
       scope.selectResult = function(result) {
         // Restore original values
         if (scope.matchClass) {
@@ -710,6 +707,7 @@
           clearResults();
         }
         else if (str.length === 0 && minlength === 0) {
+          scope.searching = false;
           showAll();
         }
 
@@ -768,7 +766,7 @@
 
       // register events
       inputField.on('keydown', keydownHandler);
-      inputField.on('keyup compositionend', keyupHandler);
+      inputField.on('keyup', keyupHandler);
 
       // set response formatter
       responseFormatter = callFunctionOrIdentity('remoteUrlResponseFormatter');
@@ -785,7 +783,6 @@
       require: '^?form',
       scope: {
         selectedObject: '=',
-        selectedObjectData: '=',
         disableInput: '=',
         initialValue: '=',
         localData: '=',
@@ -798,8 +795,6 @@
         id: '@',
         type: '@',
         placeholder: '@',
-        textSearching: '@',
-        textNoResults: '@',
         remoteUrl: '@',
         remoteUrlDataField: '@',
         titleField: '@',
